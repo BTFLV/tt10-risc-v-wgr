@@ -26,39 +26,40 @@ module fram_spi
     localparam [7:0] OPCODE_READ  = 8'h03;  // Read
 
     localparam [3:0] 
-	  ST_IDLE           = 4'd0,
+        ST_IDLE            = 4'd0,
+        // WREN command states
+        ST_WREN_ASSERT_CS  = 4'd1,
+        ST_WREN_SHIFT      = 4'd2,
+        ST_WREN_DEASSERT   = 4'd3,
+        // WRITE command states
+        ST_WRITE_ASSERT_CS = 4'd4,
+        ST_WRITE_SHIFT     = 4'd5,
+        ST_WRITE_DEASSERT  = 4'd6,
+        // READ command states
+        ST_READ_ASSERT_CS  = 4'd7,
+        ST_READ_SHIFT      = 4'd8,
+        ST_READ_DEASSERT   = 4'd9;
 
-	  // WREN command
-	  ST_WREN_ASSERT_CS = 4'd1,
-	  ST_WREN_SHIFT     = 4'd2,
-	  ST_WREN_DEASSERT  = 4'd3,
+    localparam integer CMD_WIDTH = 8 + ADDR_WIDTH + 8;
+    localparam integer CMD_WIDTH_WREN = 8;
 
-	  // WRITE command
-	  ST_WRITE_ASSERT_CS= 4'd4,
-	  ST_WRITE_SHIFT    = 4'd5,
-	  ST_WRITE_DEASSERT = 4'd6,
+    wire [CMD_WIDTH-1:0] init_data_write;
+    wire [CMD_WIDTH-1:0] init_data_read;
+    assign init_data_write = {OPCODE_WRITE, addr, write_data};
+    assign init_data_read  = {OPCODE_READ, addr, 8'd0};
 
-	  // READ command
-	  ST_READ_ASSERT_CS = 4'd7,
-	  ST_READ_SHIFT     = 4'd8,
-	  ST_READ_DEASSERT  = 4'd9;
+    reg [3:0] state, next_state;
+    reg [5:0] bit_count;
+    reg [CMD_WIDTH-1:0] shift_reg;
+    reg sck_reg;
+    reg cs_hold;
 
-    reg [3:0]  state, next_state;
-
-    reg [31:0] shift_reg;
-
-    reg [5:0]  bit_count;
-
-    reg        sck_reg;
-
-    reg        cs_hold;
-
-    // SPI Mode 0 (CPOL=0, CPHA=0)
-    always @(posedge clk or negedge rst_n) begin
+    always @(posedge clk or negedge rst_n)
+    begin
         if (!rst_n)
             sck_reg <= 1'b0;
         else if (busy)
-            sck_reg <= ~sck_reg;  
+            sck_reg <= ~sck_reg;
         else
             sck_reg <= 1'b0;
     end
@@ -66,156 +67,174 @@ module fram_spi
     always @*
         spi_sck = sck_reg;
 
-    always @* begin
-        spi_cs_n = 1'b1;
+    always @*
+    begin
         if (cs_hold)
             spi_cs_n = 1'b0;
+        else
+            spi_cs_n = 1'b1;
     end
 
-    always @* begin
+    always @*
+    begin
         next_state = state;
         case (state)
-            ST_IDLE: begin
+            ST_IDLE:
+            begin
                 if (write_enable)
                     next_state = ST_WREN_ASSERT_CS;
                 else if (read_enable)
                     next_state = ST_READ_ASSERT_CS;
             end
-
-            // WREN
             ST_WREN_ASSERT_CS:
                 next_state = ST_WREN_SHIFT;
-
-            ST_WREN_SHIFT: begin
-                if ((bit_count == 6'd8) && (sck_reg == 1'b0))
+            ST_WREN_SHIFT:
+            begin
+                if ((bit_count < CMD_WIDTH_WREN) && (sck_reg == 1'b1))
+                    next_state = ST_WREN_SHIFT;
+                else if ((bit_count == CMD_WIDTH_WREN) && (sck_reg == 1'b0))
                     next_state = ST_WREN_DEASSERT;
             end
-
             ST_WREN_DEASSERT:
                 next_state = ST_WRITE_ASSERT_CS;
-
-            // WRITE
             ST_WRITE_ASSERT_CS:
                 next_state = ST_WRITE_SHIFT;
-
-            ST_WRITE_SHIFT: begin
-                if ((bit_count == 6'd32) && (sck_reg == 1'b0))
+            ST_WRITE_SHIFT:
+            begin
+                if ((bit_count < CMD_WIDTH) && (sck_reg == 1'b1))
+                    next_state = ST_WRITE_SHIFT;
+                else if ((bit_count == CMD_WIDTH) && (sck_reg == 1'b0))
                     next_state = ST_WRITE_DEASSERT;
             end
-
             ST_WRITE_DEASSERT:
                 next_state = ST_IDLE;
-
-            // READ
             ST_READ_ASSERT_CS:
                 next_state = ST_READ_SHIFT;
-
-            ST_READ_SHIFT: begin
-                if ((bit_count == 6'd32) && (sck_reg == 1'b0))
+            ST_READ_SHIFT:
+            begin
+                if ((bit_count < CMD_WIDTH) && (sck_reg == 1'b1))
+                    next_state = ST_READ_SHIFT;
+                else if ((bit_count == CMD_WIDTH) && (sck_reg == 1'b0))
                     next_state = ST_READ_DEASSERT;
             end
-
             ST_READ_DEASSERT:
                 next_state = ST_IDLE;
-
             default:
                 next_state = ST_IDLE;
         endcase
     end
 
-    always @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always @(posedge clk or negedge rst_n)
+    begin
+        if (!rst_n)
+        begin
             state      <= ST_IDLE;
             busy       <= 1'b0;
             done       <= 1'b0;
-            shift_reg  <= 32'd0;
             bit_count  <= 6'd0;
+            shift_reg  <= {CMD_WIDTH{1'b0}};
             spi_mosi   <= 1'b0;
             read_data  <= 8'd0;
             cs_hold    <= 1'b0;
         end 
-        else begin
+        else
+        begin
             state <= next_state;
-            done <= 1'b0;
+            done  <= 1'b0;
 
             case (next_state)
-				
-                ST_IDLE: begin
+                ST_IDLE:
+                begin
                     busy      <= 1'b0;
                     spi_mosi  <= 1'b0;
-                    bit_count <= 0;
+                    bit_count <= 6'd0;
                     cs_hold   <= 1'b0;
                 end
-					 
-                ST_WREN_ASSERT_CS: begin
-                    busy       <= 1'b1;
-                    bit_count  <= 0;
-                    shift_reg  <= {24'd0, OPCODE_WREN};
-                    spi_mosi   <= OPCODE_WREN[7];
-                    cs_hold    <= 1'b1;
-                end
 
-                ST_WREN_SHIFT: begin
-                    if (sck_reg == 1'b0) begin
-                        bit_count <= bit_count + 1;
-                        shift_reg <= {shift_reg[30:0], 1'b0};
-                        spi_mosi  <= shift_reg[30];
-                    end
-                end
-
-                ST_WREN_DEASSERT: begin
-                    cs_hold <= 1'b0;
-                end
-
-                ST_WRITE_ASSERT_CS: begin
-                    busy       <= 1'b1;
-                    bit_count  <= 0;
-                    shift_reg  <= {OPCODE_WRITE, addr, write_data};
-                    spi_mosi   <= OPCODE_WRITE[7];
-                    cs_hold    <= 1'b1;
-                end
-
-                ST_WRITE_SHIFT: begin
-                    if (sck_reg == 1'b0) begin
-                        bit_count <= bit_count + 1;
-                        shift_reg <= {shift_reg[30:0], 1'b0};
-                        spi_mosi  <= shift_reg[30];
-                    end
-                end
-
-                ST_WRITE_DEASSERT: begin
-                    busy <= 1'b0;
-                    done <= 1'b1;
-                    cs_hold <= 1'b0;
-                end
-
-                ST_READ_ASSERT_CS: begin
+                ST_WREN_ASSERT_CS:
+                begin
                     busy      <= 1'b1;
-                    bit_count <= 0;
-                    shift_reg <= {OPCODE_READ, addr, 8'd0};
-                    spi_mosi  <= OPCODE_READ[7];
+                    bit_count <= 6'd0;
+                    shift_reg <= { {(CMD_WIDTH - CMD_WIDTH_WREN){1'b0}}, OPCODE_WREN };
+                    spi_mosi  <= OPCODE_WREN[7];
                     cs_hold   <= 1'b1;
                 end
 
-                ST_READ_SHIFT: begin
-                    if (sck_reg == 1'b0) begin
+                ST_WREN_SHIFT:
+                begin
+                    if (sck_reg == 1'b1)
+                    begin
                         bit_count <= bit_count + 1;
-                        shift_reg <= {shift_reg[30:0], 1'b0};
-                        spi_mosi  <= shift_reg[30];
+                        shift_reg[CMD_WIDTH_WREN-1:0] <= { shift_reg[CMD_WIDTH_WREN-2:0], 1'b0 };
+                        spi_mosi <= shift_reg[CMD_WIDTH_WREN-2];
                     end
-                    else begin
-                        if (bit_count >= 24 && bit_count < 32)
+                end
+
+                ST_WREN_DEASSERT:
+                begin
+                    cs_hold <= 1'b0;
+                end
+
+                ST_WRITE_ASSERT_CS:
+                begin
+                    busy      <= 1'b1;
+                    bit_count <= 6'd0;
+                    shift_reg <= init_data_write;
+                    cs_hold   <= 1'b1;
+                    spi_mosi  <= init_data_write[CMD_WIDTH-1];
+                end
+
+                ST_WRITE_SHIFT:
+                begin
+                    if (sck_reg == 1'b1)
+                    begin
+                        bit_count <= bit_count + 1;
+                        shift_reg <= {shift_reg[CMD_WIDTH-2:0], 1'b0};
+                        spi_mosi  <= shift_reg[CMD_WIDTH-2];
+                    end
+                end
+
+                ST_WRITE_DEASSERT:
+                begin
+                    busy    <= 1'b0;
+                    done    <= 1'b1;
+                    cs_hold <= 1'b0;
+                end
+
+                ST_READ_ASSERT_CS:
+                begin
+                    busy      <= 1'b1;
+                    bit_count <= 6'd0;
+                    shift_reg <= init_data_read;
+                    cs_hold   <= 1'b1;
+                    spi_mosi  <= init_data_read[CMD_WIDTH-1];
+                    read_data <= 8'd0;
+                end
+
+                ST_READ_SHIFT:
+                begin
+                    if (sck_reg == 1'b1)
+                    begin
+                        bit_count <= bit_count + 1;
+                        shift_reg <= {shift_reg[CMD_WIDTH-2:0], 1'b0};
+                        spi_mosi  <= shift_reg[CMD_WIDTH-2];
+                    end
+                    else if (sck_reg == 1'b0)
+                    begin
+                        if ((bit_count >= (8 + ADDR_WIDTH)) && (bit_count < CMD_WIDTH))
                             read_data <= {read_data[6:0], spi_miso};
                     end
                 end
 
-                ST_READ_DEASSERT: begin
-                    busy <= 1'b0;
-                    done <= 1'b1;
+                ST_READ_DEASSERT:
+                begin
+                    busy    <= 1'b0;
+                    done    <= 1'b1;
                     cs_hold <= 1'b0;
                 end
 
-                default: ;
+                default:
+                    ;
             endcase
         end
     end

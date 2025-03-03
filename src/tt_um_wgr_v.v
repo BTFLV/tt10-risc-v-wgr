@@ -1,6 +1,6 @@
 `default_nettype none
 
-module tt_um_wgr_v
+module wgr_v_asic
 (
     input  wire [7:0] ui_in,   
     output wire [7:0] uo_out,  
@@ -88,8 +88,7 @@ module tt_um_wgr_v
   assign uo_out[6] = mem_write;
   assign uo_out[7] = mem_busy;
   
-  
-  assign uio_out = debug_out; 
+  assign uio_out = mem_addr[7:0]; 
   assign uio_oe  = 8'hFF;
 
   wire _unused = &{ui_in[7:1], uio_in, ena};

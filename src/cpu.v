@@ -240,7 +240,7 @@ module cpu
             7'b1100011: begin // Branches
               alu_operand1 <= reg_rs1;
               alu_operand2 <= reg_rs2;
-              alu_op       <= 4'b0001; // Subtract to check zero
+              alu_op       <= 4'b0001;
             end
 
             7'b0010111: begin // AUIPC
@@ -300,7 +300,7 @@ module cpu
             if (opcode == 7'b0000011)  // LOAD
               reg_write_data <= mem_read_data;
             else if (opcode == 7'b1101111 || opcode == 7'b1100111)
-              reg_write_data <= PC + 4;  // Link value for jump instructions
+              reg_write_data <= PC + 4;
             else if (opcode == 7'b0110111)  // LUI
               reg_write_data <= imm;
             else if (opcode == 7'b0010111)  // AUIPC
