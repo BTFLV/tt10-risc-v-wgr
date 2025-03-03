@@ -1,6 +1,6 @@
 `default_nettype none
 
-module wgr_v_asic
+module tt_um_wgr_v
 (
     input  wire [7:0] ui_in,   
     output wire [7:0] uo_out,  
